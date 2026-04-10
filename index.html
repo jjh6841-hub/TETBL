@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PostgreSQL DB 비교 도구</title>
+<style>
+:root {
+  --primary: #4f46e5;
+  --primary-h: #4338ca;
+  --success: #10b981;
+  --danger: #ef4444;
+  --warn: #f59e0b;
+  --bg: #f1f5f9;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --muted: #64748b;
+  --db1: #3b82f6;
+  --db2: #f97316;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+
+/* ── HEADER ── */
+.header {
+  background: var(--primary);
+  color: #fff;
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.2);
+}
+.header h1 { font-size: 18px; font-weight: 700; }
+.header p  { font-size: 12px; opacity: .75; margin-top: 2px; }
+
+/* ── LAYOUT ── */
+.container { max-width: 1440px; margin: 0 auto; padding: 20px; }
+
+.conn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+/* ── PANEL ── */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  color: var(--muted);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #cbd5e1; display: inline-block; flex-shrink: 0; }
+.dot.ok   { background: var(--success); }
+.dot.err  { background: var(--danger); }
+
+/* ── FORM ── */
+.frow { display: grid; gap: 8px; margin-bottom: 8px; }
+.frow-2  { grid-template-columns: 1fr 90px; }
+.frow-3  { grid-template-columns: 1fr 1fr 1fr; }
+label { display: block; font-size: 11px; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
+input, select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  transition: border-color .15s;
+}
+input:focus, select:focus { outline: none; border-color: var(--primary); background: #fff; }
+
+.actions { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.status-msg { font-size: 11px; color: var(--muted); }
+
+/* ── BUTTONS ── */
+.btn {
+  padding: 7px 14px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s, background .15s;
+  white-space: nowrap;
+}
+.btn:hover { opacity: .88; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-big { padding: 10px 0; font-size: 14px; width: 100%; }
+
+/* ── OPTIONS PANEL ── */
+.opts-grid { display: grid; grid-template-columns: 2fr 2fr 1fr 140px; gap: 12px; align-items: end; }
+.where-row { margin-top: 10px; }
+
+/* ── SUMMARY ── */
+.summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 14px; }
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+}
+.stat .val { font-size: 30px; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+.stat .lbl { font-size: 11px; color: var(--muted); }
+.stat.db1  .val { color: var(--db1); }
+.stat.db2  .val { color: var(--db2); }
+.stat.diff .val { color: var(--warn); }
+.stat.same .val { color: var(--success); }
+
+/* ── SECTIONS ── */
+.section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.sec-header {
+  padding: 11px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  transition: background .1s;
+}
+.sec-header:hover { background: var(--bg); }
+.sec-title { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+.b-blue   { background: #dbeafe; color: #1d4ed8; }
+.b-orange { background: #fed7aa; color: #c2410c; }
+.b-yellow { background: #fef3c7; color: #92400e; }
+.b-green  { background: #d1fae5; color: #065f46; }
+.b-red    { background: #fee2e2; color: #991b1b; }
+.chevron  { transition: transform .2s; font-size: 11px; }
+.collapsed .chevron { transform: rotate(-90deg); }
+
+/* ── TABLE ── */
+.tbl-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th {
+  background: #f8fafc;
+  padding: 7px 11px;
+  text-align: left;
+  font-weight: 700;
+  color: var(--muted);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+td {
+  padding: 5px 11px;
+  border-bottom: 1px solid #f1f5f9;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+tr:hover td { background: #f8fafc; }
+
+/* diff table */
+.th-db1 { color: var(--db1) !important; }
+.th-db2 { color: var(--db2) !important; }
+.td-db1 { background: #eff6ff; }
+.td-db2 { background: #fff7ed; }
+.td-diff { background: #fde68a !important; font-weight: 700; }
+tr.tr-diff td { background: #fffbeb; }
+tr.tr-diff:hover td { background: #fef9e7; }
+
+/* ── MISC ── */
+.null-val { color: #9ca3af; font-style: italic; }
+.empty    { padding: 28px; text-align: center; color: var(--muted); font-size: 13px; }
+.loading  { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 48px; color: var(--muted); }
+.spin { width: 22px; height: 22px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: sp .7s linear infinite; }
+@keyframes sp { to { transform: rotate(360deg); } }
+.err-box { background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 14px 16px; color: #991b1b; font-size: 13px; white-space: pre-wrap; }
+.warn-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 9px 13px; font-size: 12px; color: #92400e; margin-bottom: 10px; }
+.info-line { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+    <ellipse cx="12" cy="5" rx="9" ry="3"/>
+    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+  </svg>
+  <div>
+    <h1>PostgreSQL DB 비교 도구</h1>
+    <p>두 데이터베이스의 데이터를 비교합니다</p>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Connection Settings -->
+  <div class="conn-grid">
+    <!-- DB 1 -->
+    <div class="panel">
+      <div class="panel-title">
+        <span class="dot" id="dot1"></span>
+        <span style="color:var(--db1)">■</span> DB 1 &mdash; 기준 DB
+      </div>
+      <div class="frow frow-2">
+        <div>
+          <label>호스트</label>
+          <input id="h1-host" value="localhost" placeholder="localhost">
+        </div>
+        <div>
+          <label>포트</label>
+          <input id="h1-port" type="number" value="5432">
+        </div>
+      </div>
+      <div class="frow frow-3">
+        <div>
+          <label>데이터베이스</label>
+          <input id="h1-db" placeholder="mydb">
+        </div>
+        <div>
+          <label>사용자</label>
+          <input id="h1-user" placeholder="postgres">
+        </div>
+        <div>
+          <label>비밀번호</label>
+          <input id="h1-pw" type="password" placeholder="••••">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-outline" onclick="testConn(1)">연결 테스트</button>
+        <button class="btn btn-outline" onclick="loadTables(1)">테이블 불러오기</button>
+        <span class="status-msg" id="sm1"></span>
+      </div>
+    </div>
+
+    <!-- DB 2 -->
+    <div class="panel">
+      <div class="panel-title">
+        <span class="dot" id="dot2"></span>
+        <span style="color:var(--db2)">■</span> DB 2 &mdash; 비교 DB
+      </div>
+      <div class="frow frow-2">
+        <div>
+          <label>호스트</label>
+          <input id="h2-host" value="localhost" placeholder="localhost">
+        </div>
+        <div>
+          <label>포트</label>
+          <input id="h2-port" type="number" value="5432">
+        </div>
+      </div>
+      <div class="frow frow-3">
+        <div>
+          <label>데이터베이스</label>
+          <input id="h2-db" placeholder="mydb2">
+        </div>
+        <div>
+          <label>사용자</label>
+          <input id="h2-user" placeholder="postgres">
+        </div>
+        <div>
+          <label>비밀번호</label>
+          <input id="h2-pw" type="password" placeholder="••••">
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-outline" onclick="testConn(2)">연결 테스트</button>
+        <button class="btn btn-outline" onclick="loadTables(2)">테이블 불러오기</button>
+        <span class="status-msg" id="sm2"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Options -->
+  <div class="panel" style="margin-bottom:14px">
+    <div class="opts-grid">
+      <div>
+        <label>테이블 선택</label>
+        <div style="display:flex;gap:6px">
+          <select id="tbl-sel" style="flex:1">
+            <option value="">-- 선택 --</option>
+          </select>
+          <input id="tbl-manual" placeholder="직접 입력" style="width:130px">
+        </div>
+      </div>
+      <div>
+        <label>기준 키 컬럼 (비워두면 PK 자동 감지)</label>
+        <input id="key-cols" placeholder="id, user_id">
+      </div>
+      <div>
+        <label>행 제한</label>
+        <select id="row-limit">
+          <option value="100">100행</option>
+          <option value="500" selected>500행</option>
+          <option value="1000">1,000행</option>
+          <option value="5000">5,000행</option>
+        </select>
+      </div>
+      <div>
+        <button class="btn btn-primary btn-big" onclick="runCompare()">▶ 비교 실행</button>
+      </div>
+    </div>
+    <div class="where-row">
+      <label>WHERE 조건 (선택사항)</label>
+      <input id="where" placeholder="예: created_at > '2024-01-01' AND status = 'active'" style="width:100%">
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="results"></div>
+
+</div>
+
+<script>
+// ── DB config helpers ──────────────────────────────────────────────────────
+function cfg(n) {
+  return {
+    host:     document.getElementById(`h${n}-host`).value.trim(),
+    port:     document.getElementById(`h${n}-port`).value,
+    database: document.getElementById(`h${n}-db`).value.trim(),
+    user:     document.getElementById(`h${n}-user`).value.trim(),
+    password: document.getElementById(`h${n}-pw`).value,
+  };
+}
+
+function setStatus(n, msg, ok) {
+  const sm = document.getElementById(`sm${n}`);
+  const dt = document.getElementById(`dot${n}`);
+  sm.textContent = msg;
+  sm.style.color = ok === true ? 'var(--success)' : ok === false ? 'var(--danger)' : 'var(--muted)';
+  dt.className = 'dot' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+}
+
+// ── API calls ──────────────────────────────────────────────────────────────
+async function post(url, body) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return r.json();
+}
+
+async function testConn(n) {
+  setStatus(n, '연결 중…', null);
+  const d = await post('/api/test-connection', cfg(n)).catch(e => ({ success: false, error: e.message }));
+  if (d.success) {
+    const ver = (d.version || '').split(' ').slice(0, 2).join(' ');
+    setStatus(n, '연결 성공 · ' + ver, true);
+  } else {
+    setStatus(n, '실패: ' + d.error, false);
+  }
+}
+
+async function loadTables(n) {
+  setStatus(n, '테이블 불러오는 중…', null);
+  const d = await post('/api/tables', cfg(n)).catch(e => ({ success: false, error: e.message }));
+  if (!d.success) { setStatus(n, '오류: ' + d.error, false); return; }
+
+  const sel = document.getElementById('tbl-sel');
+  const existing = new Set(Array.from(sel.options).map(o => o.value));
+  d.tables.forEach(t => {
+    if (!existing.has(t)) {
+      const o = document.createElement('option');
+      o.value = o.textContent = t;
+      sel.appendChild(o);
+    }
+  });
+  setStatus(n, `${d.tables.length}개 테이블 로드됨`, true);
+}
+
+async function runCompare() {
+  const table = document.getElementById('tbl-manual').value.trim()
+              || document.getElementById('tbl-sel').value;
+  if (!table) { alert('테이블을 선택하거나 입력해주세요.'); return; }
+
+  const keyRaw = document.getElementById('key-cols').value.trim();
+  const keyCols = keyRaw ? keyRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  document.getElementById('results').innerHTML =
+    '<div class="loading"><div class="spin"></div> 비교 중…</div>';
+
+  const d = await post('/api/compare', {
+    db1: cfg(1), db2: cfg(2), table,
+    key_columns: keyCols,
+    limit: document.getElementById('row-limit').value,
+    where: document.getElementById('where').value.trim(),
+  }).catch(e => ({ success: false, error: e.message }));
+
+  if (!d.success) {
+    document.getElementById('results').innerHTML =
+      `<div class="err-box"><b>오류:</b>\n${esc(d.error)}</div>`;
+    return;
+  }
+  render(d);
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function render(d) {
+  const el = document.getElementById('results');
+  let html = '';
+
+  // Summary cards
+  html += `<div class="summary-grid">
+    <div class="stat"><div class="val">${d.total_db1}</div><div class="lbl">DB1 조회 행</div></div>
+    <div class="stat"><div class="val">${d.total_db2}</div><div class="lbl">DB2 조회 行</div></div>
+    <div class="stat db1"><div class="val">${d.only_in_db1_total}</div><div class="lbl">DB1에만 있음</div></div>
+    <div class="stat db2"><div class="val">${d.only_in_db2_total}</div><div class="lbl">DB2에만 있음</div></div>
+    <div class="stat diff"><div class="val">${d.different_total}</div><div class="lbl">값 다른 행</div></div>
+  </div>`;
+
+  if (d.same_count > 0)
+    html += `<p class="info-line" style="color:var(--success)">✓ 동일한 행: <b>${d.same_count}</b>개</p>`;
+
+  // Schema diff warning
+  const sd = d.schema_diff;
+  if (sd && (sd.only_in_db1.length || sd.only_in_db2.length || sd.type_diff.length)) {
+    let w = '⚠️ 스키마 차이 감지: ';
+    if (sd.only_in_db1.length) w += `DB1에만 있는 컬럼: ${sd.only_in_db1.join(', ')}. `;
+    if (sd.only_in_db2.length) w += `DB2에만 있는 컬럼: ${sd.only_in_db2.join(', ')}. `;
+    if (sd.type_diff.length)
+      w += `타입 차이: ${sd.type_diff.map(x => `${x.column}(${x.db1_type}↔${x.db2_type})`).join(', ')}.`;
+    html += `<div class="warn-box">${esc(w)}</div>`;
+  }
+
+  if (d.truncated)
+    html += `<div class="warn-box">⚠️ 결과가 너무 많아 최대 300건만 표시됩니다. WHERE 조건이나 행 제한을 조정하세요.</div>`;
+
+  // Key info
+  if (d.key_columns && d.key_columns.length)
+    html += `<p class="info-line">기준 키: <b>${d.key_columns.join(', ')}</b></p>`;
+  else
+    html += `<p class="info-line" style="color:var(--warn)">⚠️ PK 없음 — 행 순서(인덱스) 기준으로 비교합니다</p>`;
+
+  const cols = d.columns;
+  const keys = d.key_columns || [];
+
+  // 1) Different
+  html += diffSection(d.different, cols, keys);
+  // 2) Only in DB1
+  html += onlySection('db1', d.only_in_db1, d.only_in_db1_total, cols);
+  // 3) Only in DB2
+  html += onlySection('db2', d.only_in_db2, d.only_in_db2_total, cols);
+
+  el.innerHTML = html;
+}
+
+// ── Diff section (side-by-side per column) ──────────────────────────────────
+function diffSection(rows, cols, keys) {
+  const total = rows.length;
+  const badge = `<span class="badge b-yellow">${total}</span>`;
+  const body = total === 0
+    ? `<div class="empty">값이 다른 행 없음 ✓</div>`
+    : buildDiffTable(rows, cols, keys);
+
+  return section('값이 다른 행', badge, body, total > 0);
+}
+
+function buildDiffTable(rows, cols, keys) {
+  const nonKeys = cols.filter(c => !keys.includes(c));
+
+  let h = `<div class="tbl-wrap"><table>
+  <thead><tr>
+    <th>#</th>`;
+  keys.forEach(k => { h += `<th>🔑 ${esc(k)}</th>`; });
+  nonKeys.forEach(c => {
+    h += `<th class="th-db1">[DB1] ${esc(c)}</th>`;
+    h += `<th class="th-db2">[DB2] ${esc(c)}</th>`;
+  });
+  h += '</tr></thead><tbody>';
+
+  rows.forEach((row, i) => {
+    h += `<tr class="tr-diff"><td>${i + 1}</td>`;
+    keys.forEach(k => {
+      const v = row.key ? row.key[k] : (row.db1 ? row.db1[k] : null);
+      h += `<td>${fmt(v)}</td>`;
+    });
+    nonKeys.forEach(c => {
+      const isDiff = row.diff_cols && row.diff_cols.includes(c);
+      const cls = isDiff ? ' class="td-diff"' : '';
+      const v1 = row.db1 ? row.db1[c] : undefined;
+      const v2 = row.db2 ? row.db2[c] : undefined;
+      h += `<td${cls} title="${esc(v1 ?? '')}">${fmt(v1)}</td>`;
+      h += `<td${cls} title="${esc(v2 ?? '')}">${fmt(v2)}</td>`;
+    });
+    h += '</tr>';
+  });
+
+  h += '</tbody></table></div>';
+  return h;
+}
+
+// ── Only-in section ──────────────────────────────────────────────────────────
+function onlySection(which, rows, total, cols) {
+  const isDb1 = which === 'db1';
+  const label = isDb1 ? 'DB1에만 있는 행' : 'DB2에만 있는 행';
+  const badgeClass = isDb1 ? 'b-blue' : 'b-orange';
+  const rowClass = isDb1 ? 'td-db1' : 'td-db2';
+  const badge = `<span class="badge ${badgeClass}">${total}</span>`;
+
+  const body = total === 0
+    ? `<div class="empty">없음 ✓</div>`
+    : buildOnlyTable(rows, cols, rowClass);
+
+  return section(label, badge, body, total > 0);
+}
+
+function buildOnlyTable(rows, cols, rowCls) {
+  let h = `<div class="tbl-wrap"><table>
+  <thead><tr><th>#</th>`;
+  cols.forEach(c => { h += `<th>${esc(c)}</th>`; });
+  h += '</tr></thead><tbody>';
+
+  rows.forEach((item, i) => {
+    const row = item.row || item;
+    h += `<tr><td>${i + 1}</td>`;
+    cols.forEach(c => {
+      h += `<td class="${rowCls}" title="${esc(row[c] ?? '')}">${fmt(row[c])}</td>`;
+    });
+    h += '</tr>';
+  });
+
+  h += '</tbody></table></div>';
+  return h;
+}
+
+// ── Collapsible section wrapper ─────────────────────────────────────────────
+function section(title, badgeHtml, body, expanded = true) {
+  const id = 'sec_' + Math.random().toString(36).slice(2);
+  return `
+  <div class="section" id="${id}">
+    <div class="sec-header" onclick="toggle('${id}')">
+      <span class="sec-title">${esc(title)} ${badgeHtml}</span>
+      <span class="chevron">▼</span>
+    </div>
+    <div class="sec-body">${body}</div>
+  </div>`;
+}
+
+function toggle(id) {
+  const el = document.getElementById(id);
+  const body = el.querySelector('.sec-body');
+  if (el.classList.toggle('collapsed')) body.style.display = 'none';
+  else body.style.display = '';
+}
+
+// ── Utility ─────────────────────────────────────────────────────────────────
+function fmt(v) {
+  if (v === null || v === undefined) return '<span class="null-val">NULL</span>';
+  const s = String(v);
+  return s.length > 60 ? esc(s.slice(0, 60)) + '…' : esc(s);
+}
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>
